@@ -110,6 +110,8 @@ public class HTTPManagerRequest: NSObject, NSCopying {
         }
     }
     
+    public var auth: HTTPAuth?
+    
     /// The timeout interval of the request, in seconds. If `nil`, the session's default
     /// timeout interval is used. Default is `nil`.
     public var timeoutInterval: TimeInterval?
@@ -861,6 +863,11 @@ public final class HTTPManagerParseRequest<T>: HTTPManagerRequest, HTTPManagerRe
                     default: json = nil
                     }
                     if statusCode == 401 { // Unauthorized
+                        
+                        // ask the auth object to do stuff
+                        
+                        
+                        
                         throw HTTPManagerError.unauthorized(credential: task.credential, response: response, body: data, bodyJson: json)
                     } else {
                         throw HTTPManagerError.failedResponse(statusCode: statusCode, response: response, body: data, bodyJson: json)

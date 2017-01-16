@@ -74,6 +74,7 @@ public final class HTTPManager: NSObject {
                 if $0.environment != newValue {
                     $0.environment = newValue
                     $0.defaultCredential = nil
+                    $0.auth = nil
                 }
             }
         }
@@ -138,6 +139,12 @@ public final class HTTPManager: NSObject {
             inner.asyncBarrier {
                 $0.defaultCredential = newValue
             }
+        }
+    }
+    
+    public var auth: HTTPAuth? {
+        get {
+            return inner.sync({ $0.auth })
         }
     }
     
@@ -216,6 +223,7 @@ public final class HTTPManager: NSObject {
         var environment: Environment?
         var sessionConfiguration: URLSessionConfiguration = .default
         var defaultCredential: URLCredential?
+        var auth: HTTPAuth?
         var defaultRetryBehavior: HTTPManagerRetryBehavior?
         var defaultAssumeErrorsAreJSON: Bool = false
 
@@ -627,8 +635,8 @@ extension HTTPManager {
     }
     
     private func constructRequest<T: HTTPManagerRequest>(_ path: String, f: (URL) -> T) -> T? {
-        let (environment, credential, defaultRetryBehavior, assumeErrorsAreJSON) = inner.sync({ inner -> (Environment?, URLCredential?, HTTPManagerRetryBehavior?, Bool) in
-            return (inner.environment, inner.defaultCredential, inner.defaultRetryBehavior, inner.defaultAssumeErrorsAreJSON)
+        let (environment, credential, auth, defaultRetryBehavior, assumeErrorsAreJSON) = inner.sync({ inner -> (Environment?, URLCredential?, HTTPAuth?, HTTPManagerRetryBehavior?, Bool) in
+            return (inner.environment, inner.defaultCredential, inner.auth, inner.defaultRetryBehavior, inner.defaultAssumeErrorsAreJSON)
         })
         // FIXME: Get rid of NSURL when https://github.com/apple/swift/pull/3910 is fixed.
         guard let url = NSURL(string: path, relativeTo: environment?.baseURL) as URL? else { return nil }
@@ -638,6 +646,10 @@ extension HTTPManager {
             if environment.isPrefix(of: url) {
                 request.credential = credential
             }
+        }
+        
+        if let auth = auth {
+            request.auth = auth
         }
         request.retryBehavior = defaultRetryBehavior
         request.assumeErrorsAreJSON = assumeErrorsAreJSON
