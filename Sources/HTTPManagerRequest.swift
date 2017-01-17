@@ -550,27 +550,25 @@ public class HTTPManagerNetworkRequest: HTTPManagerRequest, HTTPManagerRequestPe
         let processor: (HTTPManagerTask, HTTPManagerTaskResult<Data>, _ attempt: Int, _ retry: @escaping (HTTPManager) -> Bool, _ auth: @escaping (HTTPManager) -> Bool) -> Void = { [weak apiManager] task, result, attempt, retry, auth in
             
             let result = HTTPManagerNetworkRequest.taskProcessor(task, result)
-            if case .error(_, let error) = result, let retryBehavior = task.retryBehavior {
-                if let response = result.urlResponse as? HTTPURLResponse, response.statusCode == 401 {
-                    self.auth?.generateRequest(urlRequest: task.networkTask.currentRequest!, completion: { newReq in
-                        // guarenteed to have a token at this point
-                        //----
-                        auth(apiManager!)
-                    })
-                } else {
-                    retryBehavior.handler(task, error, attempt, { shouldRetry in
-                        if shouldRetry, let apiManager = apiManager, retry(apiManager) {
-                            // The task is now retrying
-                            return
-                        } else if let queue = queue {
-                            queue.addOperation {
-                                HTTPManagerNetworkRequest.taskCompletion(task, result, completion)
-                            }
-                        } else {
+            if case .error(_, _) = result, let response = result.urlResponse as? HTTPURLResponse, response.statusCode == 401 {
+                self.auth?.generateRequest(urlRequest: task.networkTask.currentRequest!, completion: { newReq in
+                    // guarenteed to have a token at this point
+                    //----
+                    auth(apiManager!)
+                })
+            } else if case .error(_, let error) = result, let retryBehavior = task.retryBehavior {
+                retryBehavior.handler(task, error, attempt, { shouldRetry in
+                    if shouldRetry, let apiManager = apiManager, retry(apiManager) {
+                        // The task is now retrying
+                        return
+                    } else if let queue = queue {
+                        queue.addOperation {
                             HTTPManagerNetworkRequest.taskCompletion(task, result, completion)
                         }
-                    })
-                }
+                    } else {
+                        HTTPManagerNetworkRequest.taskCompletion(task, result, completion)
+                    }
+                })
             } else if let queue = queue {
                 queue.addOperation {
                     HTTPManagerNetworkRequest.taskCompletion(task, result, completion)
@@ -824,7 +822,10 @@ public final class HTTPManagerParseRequest<T>: HTTPManagerRequest, HTTPManagerRe
         }
         return apiManager.createNetworkTaskWithRequest(self, uploadBody: uploadBody, processor: { [weak apiManager] task, result, attempt, retry, auth in
             let result = HTTPManagerParseRequest<T>.taskProcessor(task, result, expectedContentTypes, parseHandler)
-            if case .error(_, let error) = result, let retryBehavior = task.retryBehavior {
+            
+            if case .error(_, _) = result, let taskResult = task.networkTask.response as? HTTPURLResponse, taskResult.statusCode == 401 {
+                auth(apiManager!)
+            } else if case .error(_, let error) = result, let retryBehavior = task.retryBehavior {
                 retryBehavior.handler(task, error, attempt, { shouldRetry in
                     if shouldRetry, let apiManager = apiManager, retry(apiManager) {
                         // The task is now retrying
