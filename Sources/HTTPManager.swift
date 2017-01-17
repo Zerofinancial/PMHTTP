@@ -194,7 +194,7 @@ public final class HTTPManager: NSObject {
     }
     
     /// An `HTTPMockManager` that can be used to define mocks for this `HTTPManager`.
-//    public let mockManager = HTTPMockManager()
+    public let mockManager = HTTPMockManager()
     
     /// Invalidates all in-flight network operations and resets the URL session.
     ///
@@ -311,7 +311,7 @@ public final class HTTPManager: NSObject {
         // Insert HTTPMockURLProtocol into the protocol classes list.
         let config = unsafeDowncast(inner.sessionConfiguration.copy() as AnyObject, to: URLSessionConfiguration.self)
         var classes = config.protocolClasses ?? []
-//        classes.insert(HTTPMockURLProtocol.self, at: 0)
+        classes.insert(HTTPMockURLProtocol.self, at: 0)
         config.protocolClasses = classes
         let session = URLSession(configuration: config, delegate: sessionDelegate, delegateQueue: nil)
         inner.session = session
@@ -640,8 +640,8 @@ extension HTTPManager {
     }
     
     private func constructRequest<T: HTTPManagerRequest>(_ path: String, f: (URL) -> T) -> T? {
-        let (environment, credential, auth, defaultRetryBehavior, assumeErrorsAreJSON) = inner.sync({ inner -> (Environment?, URLCredential?, HTTPAuth?, HTTPManagerRetryBehavior?, Bool) in
-            return (inner.environment, inner.defaultCredential, inner.auth, inner.defaultRetryBehavior, inner.defaultAssumeErrorsAreJSON)
+        let (environment, credential, defaultRetryBehavior, assumeErrorsAreJSON) = inner.sync({ inner -> (Environment?, URLCredential?, HTTPManagerRetryBehavior?, Bool) in
+            return (inner.environment, inner.defaultCredential, inner.defaultRetryBehavior, inner.defaultAssumeErrorsAreJSON)
         })
         // FIXME: Get rid of NSURL when https://github.com/apple/swift/pull/3910 is fixed.
         guard let url = NSURL(string: path, relativeTo: environment?.baseURL) as URL? else { return nil }
@@ -1114,11 +1114,11 @@ private class SessionDelegate: NSObject {
     struct TaskInfo {
         let task: HTTPManagerTask
         let uploadBody: UploadBody?
-        let processor: (HTTPManagerTask, HTTPManagerTaskResult<Data>, _ attempt: Int, _ retry: @escaping (HTTPManager) -> Bool) -> Void
+        let processor: (HTTPManagerTask, HTTPManagerTaskResult<Data>, _ attempt: Int, _ retry: @escaping (HTTPManager) -> Bool, _ auth: @escaping (HTTPManager) -> Bool) -> Void
         var data: NSMutableData? = nil
         var attempt: Int = 0
         
-        init(task: HTTPManagerTask, uploadBody: UploadBody? = nil, processor: @escaping (HTTPManagerTask, HTTPManagerTaskResult<Data>, _ attempt: Int, _ retry: @escaping (HTTPManager) -> Bool) -> Void) {
+        init(task: HTTPManagerTask, uploadBody: UploadBody? = nil, processor: @escaping (HTTPManagerTask, HTTPManagerTaskResult<Data>, _ attempt: Int, _ retry: @escaping (HTTPManager) -> Bool, _ auth: @escaping (HTTPManager) -> Bool) -> Void) {
             self.task = task
             self.uploadBody = uploadBody
             self.processor = processor
@@ -1136,21 +1136,20 @@ extension HTTPManager {
     ///   for the task to transition to `.completed` (unless it's already been canceled).
     /// - Returns: An `HTTPManagerTask`.
     /// - Important: After creating the task, you must start it by calling the `resume()` method.
-    internal func createNetworkTaskWithRequest(_ request: HTTPManagerRequest, uploadBody: UploadBody?, processor: @escaping (HTTPManagerTask, HTTPManagerTaskResult<Data>, _ attempt: Int, _ retry: @escaping (HTTPManager) -> Bool) -> Void) -> HTTPManagerTask {
-        
+    internal func createNetworkTaskWithRequest(_ request: HTTPManagerRequest, uploadBody: UploadBody?, processor: @escaping (HTTPManagerTask, HTTPManagerTaskResult<Data>, _ attempt: Int, _ retry: @escaping (HTTPManager) -> Bool, _ auth: @escaping (HTTPManager) -> Bool) -> Void) -> HTTPManagerTask {
         
         var urlRequest = request._preparedURLRequest
         var uploadBody = uploadBody
         if case .formUrlEncoded(let queryItems)? = uploadBody {
             uploadBody = .data(FormURLEncoded.data(for: queryItems))
         }
-//        uploadBody?.evaluatePending()
-//        if let mock = request.mock ?? mockManager.mockForRequest(urlRequest, environment: environment) {
-//            // we have to go through NSMutableURLRequest in order to set the protocol property
-//            let mutReq = unsafeDowncast((urlRequest as NSURLRequest).mutableCopy() as AnyObject, to: NSMutableURLRequest.self)
-//            URLProtocol.setProperty(mock, forKey: HTTPMockURLProtocol.requestProperty, in: mutReq)
-//            urlRequest = mutReq as URLRequest
-//        }
+        uploadBody?.evaluatePending()
+        if let mock = request.mock ?? mockManager.mockForRequest(urlRequest, environment: environment) {
+            // we have to go through NSMutableURLRequest in order to set the protocol property
+            let mutReq = unsafeDowncast((urlRequest as NSURLRequest).mutableCopy() as AnyObject, to: NSMutableURLRequest.self)
+            URLProtocol.setProperty(mock, forKey: HTTPMockURLProtocol.requestProperty, in: mutReq)
+            urlRequest = mutReq as URLRequest
+        }
         
         let apiTask = inner.sync { inner -> HTTPManagerTask in
             let networkTask: URLSessionTask
@@ -1174,6 +1173,45 @@ extension HTTPManager {
             apiTask.networkTask.priority = URLSessionTask.highPriority
         }
         return apiTask
+    }
+    
+    
+    fileprivate func retryWithAuth(_ taskInfo: SessionDelegate.TaskInfo) -> Bool {
+        let request = taskInfo.task.request._preparedURLRequest
+        let networkTask = inner.sync { inner -> URLSessionTask? in
+            let networkTask: URLSessionTask
+            switch taskInfo.uploadBody {
+            case .data(let data)?:
+                networkTask = inner.session.uploadTask(with: request, from: data)
+            case _?:
+                networkTask = inner.session.uploadTask(withStreamedRequest: request)
+            case nil:
+                networkTask = inner.session.dataTask(with: request)
+            }
+            let result = taskInfo.task.resetStateToRunning(with: networkTask)
+            if !result.ok {
+                assert(result.oldState == .canceled, "internal HTTPManager error: could not reset non-canceled task back to Running state")
+                networkTask.cancel()
+                return nil
+            }
+            inner.session.delegateQueue.addOperation { [sessionDelegate=inner.sessionDelegate!] in
+                assert(sessionDelegate.tasks[networkTask.taskIdentifier] == nil, "internal HTTPManager error: tasks contains unknown taskInfo")
+                sessionDelegate.tasks[networkTask.taskIdentifier] = taskInfo
+            }
+            return networkTask
+        }
+        if let networkTask = networkTask {
+            if taskInfo.task.affectsNetworkActivityIndicator {
+                taskInfo.task.setTrackingNetworkActivity()
+            }
+            if taskInfo.task.userInitiated {
+                networkTask.priority = URLSessionTask.highPriority
+            }
+            networkTask.resume()
+            return true
+        } else {
+            return false
+        }
     }
     
     /// Transitions the given task back into `.running` with a new network task.
@@ -1321,7 +1359,7 @@ extension SessionDelegate: URLSessionDataDelegate {
             assert(result.ok, "internal HTTPManager error: tried to cancel task that's already completed")
             queue.async {
                 autoreleasepool {
-                    processor(apiTask, .canceled, taskInfo.attempt, { _ in return false })
+                    processor(apiTask, .canceled, taskInfo.attempt, { _ in return false }, { _ in return true })
                 }
             }
         } else {
@@ -1332,15 +1370,18 @@ extension SessionDelegate: URLSessionDataDelegate {
                     func retry(_ apiManager: HTTPManager) -> Bool {
                         return apiManager.retryNetworkTask(taskInfo)
                     }
+                    func auth(_ apiManager: HTTPManager) -> Bool {
+                        return apiManager.retryWithAuth(taskInfo)
+                    }
                     autoreleasepool {
                         if let error = error {
-                            processor(apiTask, .error(task.response, error), taskInfo.attempt, retry)
+                            processor(apiTask, .error(task.response, error), taskInfo.attempt, retry, auth)
                         } else if let response = task.response {
-                            processor(apiTask, .success(response, taskInfo.data as Data? ?? Data()), taskInfo.attempt, retry)
+                            processor(apiTask, .success(response, taskInfo.data as Data? ?? Data()), taskInfo.attempt, retry, auth)
                         } else {
                             // this should be unreachable
                             let userInfo = [NSLocalizedDescriptionKey: "internal error: task response was nil with no error"]
-                            processor(apiTask, .error(nil, NSError(domain: NSURLErrorDomain, code: NSURLErrorUnknown, userInfo: userInfo)), taskInfo.attempt, retry)
+                            processor(apiTask, .error(nil, NSError(domain: NSURLErrorDomain, code: NSURLErrorUnknown, userInfo: userInfo)), taskInfo.attempt, retry, auth)
                         }
                     }
                 }
@@ -1349,7 +1390,7 @@ extension SessionDelegate: URLSessionDataDelegate {
                 // We must have canceled concurrently with the networking portion finishing
                 queue.async {
                     autoreleasepool {
-                        processor(apiTask, .canceled, taskInfo.attempt, { _ in return false })
+                        processor(apiTask, .canceled, taskInfo.attempt, { _ in return false }, { _ in return true })
                     }
                 }
             }

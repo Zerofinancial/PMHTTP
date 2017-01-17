@@ -266,8 +266,8 @@ public class HTTPManagerRequest: NSObject, NSCopying {
             request.setValue(basicAuthentication(credential), forHTTPHeaderField: "Authorization")
         }
         
-        if let auth = auth {
-            request = auth.updateHeaders(forRequest: request)
+        if let authHeaderValue = auth?.authHeaderValue {
+            request.setValue(authHeaderValue, forHTTPHeaderField: "Authorization")
         }
         let contentType = self.contentType
         if contentType.isEmpty {
@@ -545,32 +545,32 @@ public class HTTPManagerNetworkRequest: HTTPManagerRequest, HTTPManagerRequestPe
     ///   will be invoked on *queue* if provided, otherwise on a global concurrent queue.
     /// - Returns: An `HTTPManagerTask` that represents the operation.
     /// - Important: After you create the task, you must start it by calling the `resume()` method.
-    public func createTask(withCompletionQueue queue: OperationQueue? = nil, auth: HTTPAuth? = nil,
+    public func createTask(withCompletionQueue queue: OperationQueue? = nil,
                            completion: @escaping (_ task: HTTPManagerTask, _ result: HTTPManagerTaskResult<Data>) -> Void) -> HTTPManagerTask {
-        return apiManager.createNetworkTaskWithRequest(self, uploadBody: uploadBody, processor: { [weak apiManager] task, result, attempt, retry in
-
+        let processor: (HTTPManagerTask, HTTPManagerTaskResult<Data>, _ attempt: Int, _ retry: @escaping (HTTPManager) -> Bool, _ auth: @escaping (HTTPManager) -> Bool) -> Void = { [weak apiManager] task, result, attempt, retry, auth in
+            
             let result = HTTPManagerNetworkRequest.taskProcessor(task, result)
             if case .error(_, let error) = result, let retryBehavior = task.retryBehavior {
                 if let response = result.urlResponse as? HTTPURLResponse, response.statusCode == 401 {
-                    auth?.generateRequest(urlRequest: task.networkTask.currentRequest!, completion: { newReq in
-                        //
+                    self.auth?.generateRequest(urlRequest: task.networkTask.currentRequest!, completion: { newReq in
+                        // guarenteed to have a token at this point
+                        //----
+                        auth(apiManager!)
                     })
-                    
-                    return
-                }
-    
-                retryBehavior.handler(task, error, attempt, { shouldRetry in
-                    if shouldRetry, let apiManager = apiManager, retry(apiManager) {
-                        // The task is now retrying
-                        return
-                    } else if let queue = queue {
-                        queue.addOperation {
+                } else {
+                    retryBehavior.handler(task, error, attempt, { shouldRetry in
+                        if shouldRetry, let apiManager = apiManager, retry(apiManager) {
+                            // The task is now retrying
+                            return
+                        } else if let queue = queue {
+                            queue.addOperation {
+                                HTTPManagerNetworkRequest.taskCompletion(task, result, completion)
+                            }
+                        } else {
                             HTTPManagerNetworkRequest.taskCompletion(task, result, completion)
                         }
-                    } else {
-                        HTTPManagerNetworkRequest.taskCompletion(task, result, completion)
-                    }
-                })
+                    })
+                }
             } else if let queue = queue {
                 queue.addOperation {
                     HTTPManagerNetworkRequest.taskCompletion(task, result, completion)
@@ -578,7 +578,8 @@ public class HTTPManagerNetworkRequest: HTTPManagerRequest, HTTPManagerRequestPe
             } else {
                 HTTPManagerNetworkRequest.taskCompletion(task, result, completion)
             }
-        })
+        }
+        return apiManager.createNetworkTaskWithRequest(self, uploadBody: uploadBody, processor: processor)
     }
     
     /// Executes a block with `self` as the argument, and then returns `self` again.
@@ -821,7 +822,7 @@ public final class HTTPManagerParseRequest<T>: HTTPManagerRequest, HTTPManagerRe
             parseHandler = self.parseHandler
             expectedContentTypes = self.expectedContentTypes
         }
-        return apiManager.createNetworkTaskWithRequest(self, uploadBody: uploadBody, processor: { [weak apiManager] task, result, attempt, retry in
+        return apiManager.createNetworkTaskWithRequest(self, uploadBody: uploadBody, processor: { [weak apiManager] task, result, attempt, retry, auth in
             let result = HTTPManagerParseRequest<T>.taskProcessor(task, result, expectedContentTypes, parseHandler)
             if case .error(_, let error) = result, let retryBehavior = task.retryBehavior {
                 retryBehavior.handler(task, error, attempt, { shouldRetry in
@@ -884,11 +885,7 @@ public final class HTTPManagerParseRequest<T>: HTTPManagerRequest, HTTPManagerRe
                     default: json = nil
                     }
                     if statusCode == 401 { // Unauthorized
-                        
                         // ask the auth object to do stuff
-                        
-                        
-                        
                         throw HTTPManagerError.unauthorized(credential: task.credential, response: response, body: data, bodyJson: json)
                     } else {
                         throw HTTPManagerError.failedResponse(statusCode: statusCode, response: response, body: data, bodyJson: json)
@@ -949,6 +946,7 @@ public final class HTTPManagerParseRequest<T>: HTTPManagerRequest, HTTPManagerRe
         super.init(apiManager: request.apiManager, URL: request.url, method: request.requestMethod, parameters: request.parameters)
         isIdempotent = request.isIdempotent
         credential = request.credential
+        auth = request.auth
         timeoutInterval = request.timeoutInterval
         cachePolicy = request.cachePolicy
         shouldFollowRedirects = request.shouldFollowRedirects

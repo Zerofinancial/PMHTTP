@@ -46,7 +46,9 @@ public final class HTTPManagerTask: NSObject {
     
     /// The `URLCredential` used to authenticate the request, if any.
     public let credential: URLCredential?
-    
+
+    public let auth: HTTPAuth?
+
     /// The current state of the task.
     /// - Note: This property is thread-safe and may be accessed concurrently.
     /// - Note: This property supports KVO. The KVO notifications will execute
@@ -118,7 +120,8 @@ public final class HTTPManagerTask: NSObject {
     internal let defaultResponseCacheStoragePolicy: URLCache.StoragePolicy
     internal let retryBehavior: HTTPManagerRetryBehavior?
     internal let affectsNetworkActivityIndicator: Bool
-    private let sessionDelegateQueue: OperationQueue
+    internal let sessionDelegateQueue: OperationQueue
+    internal let request: HTTPManagerRequest
     
     internal init(networkTask: URLSessionTask, request: HTTPManagerRequest, sessionDelegateQueue: OperationQueue) {
         _stateBox = _PMHTTPManagerTaskStateBox(state: State.running.boxState, networkTask: networkTask)
@@ -131,6 +134,9 @@ public final class HTTPManagerTask: NSObject {
         retryBehavior = request.retryBehavior
         affectsNetworkActivityIndicator = request.affectsNetworkActivityIndicator
         self.sessionDelegateQueue = sessionDelegateQueue
+        auth = request.auth
+        self.request = request
+        
         super.init()
     }
     
@@ -139,7 +145,7 @@ public final class HTTPManagerTask: NSObject {
         // can deregister before we release our properties
         objc_removeAssociatedObjects(self)
     }
-    
+
     internal func transitionState(to newState: State) -> (ok: Bool, oldState: State) {
         willChangeValue(forKey: "state")
         defer { didChangeValue(forKey: "state") }
@@ -196,6 +202,8 @@ extension HTTPManagerTask {
     public override var debugDescription: String {
         return getDescription(true)
     }
+    
+//    func createTask(fromTask task: HTTPManagerTask,)
     
     private func getDescription(_ debug: Bool) -> String {
         // FIXME: Use ObjectIdentifier.address or whatever it's called when it's available
