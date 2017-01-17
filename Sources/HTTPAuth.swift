@@ -12,6 +12,10 @@ public class HTTPAuth {
     func generateRequest(urlRequest: URLRequest, completion: @escaping (_ processedRequest: URLRequest) -> Void) {
         completion(urlRequest)
     }
+    
+    func updateHeaders(forRequest request: URLRequest) -> URLRequest {
+        return request
+    }
 }
 
 public class HTTPStandardOAuth2Auth: HTTPAuth {
@@ -20,18 +24,17 @@ public class HTTPStandardOAuth2Auth: HTTPAuth {
     public let accessTokenURL: URL
     public let clientID: String
     public let clientSecret: String
-    public let credential: URLCredential
+    public let grantType: String
     
     private var token: String?
     
-    init(accessTokenURL: URL, clientID: String, clientSecret: String,
-         credential: URLCredential, username: String, password: String, token: String? = nil) {
+    public init(accessTokenURL: URL, clientID: String, clientSecret: String, username: String, password: String, grantType: String, token: String? = nil) {
         self.accessTokenURL = accessTokenURL
         self.clientID = clientID
         self.clientSecret = clientSecret
         self.username = username
         self.password = password
-        self.credential = credential
+        self.grantType = grantType
     }
     
     override func generateRequest(urlRequest: URLRequest, completion: @escaping (_ processedRequest: URLRequest) -> Void) {
@@ -46,19 +49,41 @@ public class HTTPStandardOAuth2Auth: HTTPAuth {
         if let token = token {
             completion(injectToken(token: token))
         } else {
-            // Let's get a token!
-            HTTP.request(POST: accessTokenURL.absoluteString,
-                                           parameters: ["username": username, "password": password])
-                .parseAsJSON()
-                .performRequest(withCompletionQueue: .main, completion: { task, result in
-                    switch result {
-                    case let .success(_, payload):
-                        self.token = try! payload?.getStringOrNil("token")
-                        completion(injectToken(token: self.token!))
-                    default:
-                        print("error!")
-                    }
-            })
+            refreshToken() { token in
+                completion(injectToken(token: token))
+            }
         }
+    }
+    
+    override func updateHeaders(forRequest request: URLRequest) -> URLRequest {
+        var mutableReq = request
+        if let token = token {
+            mutableReq.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        
+        return mutableReq
+    }
+    
+    private func refreshToken(completion: (_ token: String) -> Void) {
+        // Let's get a token!
+        let auth = clientID + ":" + clientSecret
+        let aData = auth.data(using: .utf8)!
+        let aVal = "Basic \(aData.base64EncodedString())"
+
+        let task = HTTP.request(POST: accessTokenURL.absoluteString,
+                                parameters: ["username": username, "password": password, "grant_type": grantType])
+
+        task?.headerFields = ["Authorization" : aVal]
+        task?.parseAsJSON()
+        .performRequest(withCompletionQueue: .main, completion: { task, result in
+            switch result {
+            case let .success(_, payload):
+                self.token = try! payload?.getStringOrNil("refresh_token")
+                print("self.token \(self.token)")
+                
+            default:
+                print("error!")
+            }
+        })
     }
 }

@@ -146,6 +146,11 @@ public final class HTTPManager: NSObject {
         get {
             return inner.sync({ $0.auth })
         }
+        set {
+            inner.asyncBarrier({
+                $0.auth = newValue
+            })
+        }
     }
     
     /// The default retry behavior to use for requests. The default value is `nil`.
@@ -189,7 +194,7 @@ public final class HTTPManager: NSObject {
     }
     
     /// An `HTTPMockManager` that can be used to define mocks for this `HTTPManager`.
-    public let mockManager = HTTPMockManager()
+//    public let mockManager = HTTPMockManager()
     
     /// Invalidates all in-flight network operations and resets the URL session.
     ///
@@ -306,7 +311,7 @@ public final class HTTPManager: NSObject {
         // Insert HTTPMockURLProtocol into the protocol classes list.
         let config = unsafeDowncast(inner.sessionConfiguration.copy() as AnyObject, to: URLSessionConfiguration.self)
         var classes = config.protocolClasses ?? []
-        classes.insert(HTTPMockURLProtocol.self, at: 0)
+//        classes.insert(HTTPMockURLProtocol.self, at: 0)
         config.protocolClasses = classes
         let session = URLSession(configuration: config, delegate: sessionDelegate, delegateQueue: nil)
         inner.session = session
@@ -1132,18 +1137,21 @@ extension HTTPManager {
     /// - Returns: An `HTTPManagerTask`.
     /// - Important: After creating the task, you must start it by calling the `resume()` method.
     internal func createNetworkTaskWithRequest(_ request: HTTPManagerRequest, uploadBody: UploadBody?, processor: @escaping (HTTPManagerTask, HTTPManagerTaskResult<Data>, _ attempt: Int, _ retry: @escaping (HTTPManager) -> Bool) -> Void) -> HTTPManagerTask {
+        
+        
         var urlRequest = request._preparedURLRequest
         var uploadBody = uploadBody
         if case .formUrlEncoded(let queryItems)? = uploadBody {
             uploadBody = .data(FormURLEncoded.data(for: queryItems))
         }
-        uploadBody?.evaluatePending()
-        if let mock = request.mock ?? mockManager.mockForRequest(urlRequest, environment: environment) {
-            // we have to go through NSMutableURLRequest in order to set the protocol property
-            let mutReq = unsafeDowncast((urlRequest as NSURLRequest).mutableCopy() as AnyObject, to: NSMutableURLRequest.self)
-            URLProtocol.setProperty(mock, forKey: HTTPMockURLProtocol.requestProperty, in: mutReq)
-            urlRequest = mutReq as URLRequest
-        }
+//        uploadBody?.evaluatePending()
+//        if let mock = request.mock ?? mockManager.mockForRequest(urlRequest, environment: environment) {
+//            // we have to go through NSMutableURLRequest in order to set the protocol property
+//            let mutReq = unsafeDowncast((urlRequest as NSURLRequest).mutableCopy() as AnyObject, to: NSMutableURLRequest.self)
+//            URLProtocol.setProperty(mock, forKey: HTTPMockURLProtocol.requestProperty, in: mutReq)
+//            urlRequest = mutReq as URLRequest
+//        }
+        
         let apiTask = inner.sync { inner -> HTTPManagerTask in
             let networkTask: URLSessionTask
             switch uploadBody {

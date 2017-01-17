@@ -236,6 +236,7 @@ public class HTTPManagerRequest: NSObject, NSCopying {
         mock = request.mock
         affectsNetworkActivityIndicator = request.affectsNetworkActivityIndicator
         headerFields = request.headerFields
+        auth = request.auth
         super.init()
     }
     
@@ -245,6 +246,10 @@ public class HTTPManagerRequest: NSObject, NSCopying {
             let data = phrase.data(using: String.Encoding.utf8)!
             let encoded = data.base64EncodedString(options: [])
             return "Basic \(encoded)"
+        }
+        
+        func processAuth(auth: HTTPAuth) -> String {
+            return "hello"
         }
         
         var request = URLRequest(url: url)
@@ -259,6 +264,10 @@ public class HTTPManagerRequest: NSObject, NSCopying {
         request.allHTTPHeaderFields = headerFields.dictionary
         if let credential = credential {
             request.setValue(basicAuthentication(credential), forHTTPHeaderField: "Authorization")
+        }
+        
+        if let auth = auth {
+            request = auth.updateHeaders(forRequest: request)
         }
         let contentType = self.contentType
         if contentType.isEmpty {
@@ -536,10 +545,20 @@ public class HTTPManagerNetworkRequest: HTTPManagerRequest, HTTPManagerRequestPe
     ///   will be invoked on *queue* if provided, otherwise on a global concurrent queue.
     /// - Returns: An `HTTPManagerTask` that represents the operation.
     /// - Important: After you create the task, you must start it by calling the `resume()` method.
-    public func createTask(withCompletionQueue queue: OperationQueue? = nil, completion: @escaping (_ task: HTTPManagerTask, _ result: HTTPManagerTaskResult<Data>) -> Void) -> HTTPManagerTask {
+    public func createTask(withCompletionQueue queue: OperationQueue? = nil, auth: HTTPAuth? = nil,
+                           completion: @escaping (_ task: HTTPManagerTask, _ result: HTTPManagerTaskResult<Data>) -> Void) -> HTTPManagerTask {
         return apiManager.createNetworkTaskWithRequest(self, uploadBody: uploadBody, processor: { [weak apiManager] task, result, attempt, retry in
+
             let result = HTTPManagerNetworkRequest.taskProcessor(task, result)
             if case .error(_, let error) = result, let retryBehavior = task.retryBehavior {
+                if let response = result.urlResponse as? HTTPURLResponse, response.statusCode == 401 {
+                    auth?.generateRequest(urlRequest: task.networkTask.currentRequest!, completion: { newReq in
+                        //
+                    })
+                    
+                    return
+                }
+    
                 retryBehavior.handler(task, error, attempt, { shouldRetry in
                     if shouldRetry, let apiManager = apiManager, retry(apiManager) {
                         // The task is now retrying
@@ -559,7 +578,7 @@ public class HTTPManagerNetworkRequest: HTTPManagerRequest, HTTPManagerRequestPe
             } else {
                 HTTPManagerNetworkRequest.taskCompletion(task, result, completion)
             }
-            })
+        })
     }
     
     /// Executes a block with `self` as the argument, and then returns `self` again.
@@ -585,10 +604,12 @@ public class HTTPManagerNetworkRequest: HTTPManagerRequest, HTTPManagerRequestPe
                 let json: JSON?
                 switch response.mimeType.map(MediaType.init) {
                 case _ where task.assumeErrorsAreJSON: fallthrough
-                case MediaType("application/json")?, MediaType("text/json")?: json = try? JSON.decode(data)
+//                case MediaType("application/json")?, MediaType("text/json")?: json = try? JSON.decode(data)
                 default: json = nil
                 }
                 if statusCode == 401 { // Unauthorized
+                    
+                    
                     throw HTTPManagerError.unauthorized(credential: task.credential, response: response, body: data, bodyJson: json)
                 } else {
                     throw HTTPManagerError.failedResponse(statusCode: statusCode, response: response, body: data, bodyJson: json)
