@@ -39,11 +39,11 @@ public extension HTTPManagerError {
         return .failedResponse(statusCode: statusCode, response: response, body: body, bodyJson: bodyJson)
     }
     
-    @available(*, unavailable, renamed: "unauthorized")
-    static func Unauthorized(credential: URLCredential?, response: HTTPURLResponse, body: Data, bodyJson: JSON?) -> HTTPManagerError {
-        return .unauthorized(credential: credential, response: response, body: body, bodyJson: bodyJson)
-    }
-    
+//    @available(*, unavailable, renamed: "unauthorized")
+//    static func Unauthorized(credential: URLCredential?, response: HTTPURLResponse, body: Data, bodyJson: JSON?) -> HTTPManagerError {
+//        return .unauthorized(auth: auth, response: response, body: body, bodyJson: bodyJson)
+//    }
+//    
     @available(*, unavailable, renamed: "unexpectedContentType")
     static func UnexpectedContentType(contentType: String, response: HTTPURLResponse, body: Data) -> HTTPManagerError {
         return .unexpectedContentType(contentType: contentType, response: response, body: body)

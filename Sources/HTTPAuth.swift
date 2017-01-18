@@ -16,11 +16,16 @@ public class HTTPAuth {
     var authHeaderValue: String? {
         preconditionFailure("This method must be overridden")
     }
-    
-    func updateHeaders(forRequest request: URLRequest) -> URLRequest {
-        return request
-    }
 }
+
+//public class HTTPBasicAuth: HTTPAuth {
+//    func basicAuthentication(_ credential: URLCredential) -> String {
+//        let phrase = "\(credential.user ?? ""):\(credential.password ?? "")"
+//        let data = phrase.data(using: String.Encoding.utf8)!
+//        let encoded = data.base64EncodedString(options: [])
+//        return "Basic \(encoded)"
+//    }
+//}
 
 public class HTTPStandardOAuth2Auth: HTTPAuth {
     public let username: String
@@ -67,15 +72,6 @@ public class HTTPStandardOAuth2Auth: HTTPAuth {
                 completion(injectToken(token: token!))
             }
         }
-    }
-    
-    override func updateHeaders(forRequest request: URLRequest) -> URLRequest {
-        var mutableReq = request
-        if let token = token {
-            mutableReq.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-        
-        return mutableReq
     }
     
     private func refreshToken(completion: @escaping (_ token: String?) -> Void) {

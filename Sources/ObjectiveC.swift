@@ -812,11 +812,6 @@ public final class HTTPManagerObjectParseRequest: HTTPManagerRequest, HTTPManage
         return _request.parameters
     }
     
-    public override var credential: URLCredential? {
-        get { return _request.credential }
-        set { _request.credential = newValue }
-    }
-    
     public override var timeoutInterval: TimeInterval? {
         get { return _request.timeoutInterval }
         set { _request.timeoutInterval = newValue }
