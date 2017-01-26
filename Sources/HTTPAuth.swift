@@ -17,7 +17,7 @@ public protocol HTTPAuth {
     func authFailureMessage(response: HTTPURLResponse, body: Data, json: JSON?) -> String?
 }
 
-// WIP Example OAuth2 implementation
+// WIP crappy and incomplete example OAuth2 implementation
 
 public class HTTPStandardOAuth2Auth: HTTPAuth {
     public let username: String
@@ -26,21 +26,17 @@ public class HTTPStandardOAuth2Auth: HTTPAuth {
     public let clientID: String
     public let clientSecret: String
     public let grantType: String
-    
     private var token: String?
-    var retryBehavior: HTTPManagerRetryBehavior?
     
     public init(accessTokenURL: URL, clientID: String, clientSecret: String,
                 username: String, password: String,
-                grantType: String, token: String? = nil,
-                retryBehavior: HTTPManagerRetryBehavior?) {
+                grantType: String, token: String? = nil) {
         self.accessTokenURL = accessTokenURL
         self.clientID = clientID
         self.clientSecret = clientSecret
         self.username = username
         self.password = password
         self.grantType = grantType
-        self.retryBehavior = retryBehavior
     }
     
     public var headers: [String: String]? {
