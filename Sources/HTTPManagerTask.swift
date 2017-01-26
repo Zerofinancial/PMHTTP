@@ -43,10 +43,9 @@ public final class HTTPManagerTask: NSObject {
     /// it could be used for external functionality such as showing a Retry button in an
     /// error dialog.
     @nonobjc public let isIdempotent: Bool
-    
-    /// The `URLCredential` used to authenticate the request, if any.
-    public let credential: URLCredential?
-    
+
+    public let auth: HTTPAuth?
+
     /// The current state of the task.
     /// - Note: This property is thread-safe and may be accessed concurrently.
     /// - Note: This property supports KVO. The KVO notifications will execute
@@ -129,12 +128,12 @@ public final class HTTPManagerTask: NSObject {
     internal let defaultResponseCacheStoragePolicy: URLCache.StoragePolicy
     internal let retryBehavior: HTTPManagerRetryBehavior?
     internal let affectsNetworkActivityIndicator: Bool
+    internal let request: HTTPManagerRequest
     private let sessionDelegateQueue: OperationQueue
     
     internal init(networkTask: URLSessionTask, request: HTTPManagerRequest, sessionDelegateQueue: OperationQueue) {
         _stateBox = _PMHTTPManagerTaskStateBox(state: State.running.boxState, networkTask: networkTask)
         isIdempotent = request.isIdempotent
-        credential = request.credential
         userInitiated = request.userInitiated
         followRedirects = request.shouldFollowRedirects
         assumeErrorsAreJSON = request.assumeErrorsAreJSON
@@ -142,6 +141,9 @@ public final class HTTPManagerTask: NSObject {
         retryBehavior = request.retryBehavior
         affectsNetworkActivityIndicator = request.affectsNetworkActivityIndicator
         self.sessionDelegateQueue = sessionDelegateQueue
+        auth = request.auth
+        self.request = request
+        
         super.init()
     }
     
@@ -150,7 +152,7 @@ public final class HTTPManagerTask: NSObject {
         // can deregister before we release our properties
         objc_removeAssociatedObjects(self)
     }
-    
+
     internal func transitionState(to newState: State) -> (ok: Bool, oldState: State) {
         willChangeValue(forKey: "state")
         defer { didChangeValue(forKey: "state") }
@@ -212,9 +214,11 @@ extension HTTPManagerTask {
         // FIXME: Use ObjectIdentifier.address or whatever it's called when it's available
         let ptr = unsafeBitCast(Unmanaged.passUnretained(self).toOpaque(), to: UInt.self)
         var s = "<HTTPManagerTask: 0x\(String(ptr, radix: 16)) (\(state))"
-        if let user = credential?.user {
-            s += " user=\(String(reflecting: user))"
+        
+        if let auth = auth {
+            s += " HTTPAuth=\(String(reflecting: auth))"
         }
+
         if userInitiated {
             s += " userInitiated"
         }

@@ -41,7 +41,7 @@ public extension HTTPManagerError {
     
     @available(*, unavailable, renamed: "unauthorized")
     static func Unauthorized(credential: URLCredential?, response: HTTPURLResponse, body: Data, bodyJson: JSON?) -> HTTPManagerError {
-        return .unauthorized(credential: credential, response: response, body: body, bodyJson: bodyJson)
+        return .unauthorized(auth: nil, response: response, body: body, bodyJson: bodyJson)
     }
     
     @available(*, unavailable, renamed: "unexpectedContentType")
